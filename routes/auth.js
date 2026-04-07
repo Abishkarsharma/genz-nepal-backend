@@ -74,4 +74,24 @@ router.patch('/users/:id/role', protect, requireRole('admin'), async (req, res) 
   }
 });
 
+// One-time admin setup — creates admin if none exists
+router.post('/setup-admin', async (req, res) => {
+  try {
+    const { email, password, setupKey } = req.body;
+    if (setupKey !== process.env.SETUP_KEY) {
+      return res.status(403).json({ message: 'Invalid setup key' });
+    }
+    const existing = await User.findOne({ email });
+    if (existing) {
+      await User.updateOne({ email }, { role: 'admin' });
+      return res.json({ message: `${email} upgraded to admin` });
+    }
+    const hashed = await bcrypt.hash(password, 10);
+    await User.create({ name: 'Admin', email, password: hashed, role: 'admin' });
+    res.json({ message: 'Admin account created' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;
