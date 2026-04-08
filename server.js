@@ -62,6 +62,10 @@ mongoose
       await Product.insertMany(require('./seed'));
       console.log('Sample products seeded');
     }
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      // Start keepalive pinger in production to prevent Render spin-down
+      if (process.env.NODE_ENV !== 'development') require('./keepalive');
+    });
   })
   .catch((err) => console.error(err));
