@@ -42,6 +42,14 @@ router.get('/:id', async (req, res) => {
 // Admin or Seller: create product
 router.post('/', protect, requireRole('admin', 'seller'), async (req, res) => {
   try {
+    const { name, price, stock, category } = req.body;
+    if (!name || price === undefined || !category)
+      return res.status(400).json({ message: 'name, price, and category are required' });
+    if (isNaN(price) || Number(price) < 0)
+      return res.status(400).json({ message: 'price must be a non-negative number' });
+    if (stock !== undefined && (isNaN(stock) || Number(stock) < 0))
+      return res.status(400).json({ message: 'stock must be a non-negative number' });
+
     const product = await Product.create({ ...req.body, createdBy: req.user.id });
     res.status(201).json(product);
   } catch (err) {
