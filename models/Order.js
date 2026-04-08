@@ -17,9 +17,16 @@ const orderSchema = new mongoose.Schema({
     city: String,
     address: String,
   },
-  paymentMethod: { type: String, default: 'Cash on Delivery' },
+  paymentMethod: {
+    type: String,
+    enum: ['Cash on Delivery', 'Card / Wallet', 'eSewa', 'Khalti', 'Bank Transfer'],
+    default: 'Cash on Delivery',
+  },
+  paymentStatus: { type: String, enum: ['pending', 'paid'], default: 'pending' },
+  paymentRef: { type: String, default: '' },
   subtotal: Number,
   shipping: { type: Number, default: 250 },
+  tax: { type: Number, default: 0 },
   total: Number,
   status: { type: String, default: 'pending' },
 }, { timestamps: true });

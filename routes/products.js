@@ -2,10 +2,25 @@ const router = require('express').Router();
 const Product = require('../models/Product');
 const { protect, requireRole } = require('../middleware/auth');
 
-// Public: get all products
+// Public: get all products (with optional category, search, barcode filter)
 router.get('/', async (req, res) => {
   try {
-    const filter = req.query.category ? { category: req.query.category } : {};
+    const { category, search, barcode } = req.query;
+
+    // Barcode lookup — return single product
+    if (barcode) {
+      const product = await Product.findOne({ barcode });
+      if (!product) return res.status(404).json({ message: 'Product not found' });
+      return res.json(product);
+    }
+
+    let filter = {};
+    if (category) filter.category = category;
+    if (search) {
+      const regex = new RegExp(search, 'i');
+      filter.$or = [{ name: regex }, { category: regex }];
+    }
+
     const products = await Product.find(filter);
     res.json(products);
   } catch (err) {

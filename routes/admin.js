@@ -3,6 +3,7 @@ const { protect, requireRole } = require('../middleware/auth');
 const User = require('../models/User');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
+const Message = require('../models/Message');
 
 // All admin routes require auth + admin role
 router.use(protect, requireRole('admin'));
@@ -81,6 +82,20 @@ router.patch('/orders/:id/status', async (req, res) => {
       { new: true }
     );
     res.json(order);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// All messages
+router.get('/messages', async (req, res) => {
+  try {
+    const messages = await Message.find()
+      .populate('sender', 'name email')
+      .populate('product', 'name image')
+      .populate('seller', 'name email')
+      .sort({ createdAt: -1 });
+    res.json(messages);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
