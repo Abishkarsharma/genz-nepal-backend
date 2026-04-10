@@ -147,8 +147,28 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// Get current user's orders
-router.get('/my', protect, async (req, res) => {
+// Customer: cancel their own order (only if pending or processing)
+router.patch('/cancel/:id', protect, async (req, res) => {
+  try {
+    const order = await Order.findOne({ _id: req.params.id, user: req.user.id });
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    if (!['pending', 'processing'].includes(order.status)) {
+      return res.status(400).json({ message: `Cannot cancel an order that is already ${order.status}` });
+    }
+
+    // Restore stock for each item
+    for (const item of order.items) {
+      if (!item.product) continue;
+      await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity } });
+    }
+
+    order.status = 'cancelled';
+    await order.save();
+    res.json({ message: 'Order cancelled successfully', order });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
   try {
     const orders = await Order.find({ user: req.user.id }).sort({ createdAt: -1 });
     res.json(orders);
