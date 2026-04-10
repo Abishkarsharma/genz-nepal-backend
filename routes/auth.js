@@ -155,17 +155,52 @@ router.post('/setup-admin', async (req, res) => {
   }
 });
 
-// Forgot password
+// Forgot password — Step 1: send OTP
 router.post('/forgot-password', async (req, res) => {
   try {
-    const { email, newPassword } = req.body;
-    if (!email || !newPassword) return res.status(400).json({ message: 'Email and new password are required' });
-    if (newPassword.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' });
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email is required' });
+
     const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ message: 'No account with that email' });
-    user.password = await bcrypt.hash(newPassword, 10);
+    // Always respond the same way — don't reveal if email exists (security)
+    if (!user) return res.json({ message: 'If that email exists, a reset code was sent' });
+
+    const otp = generateOtp();
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    user.emailOtp = otp;
+    user.emailOtpExpiry = otpExpiry;
     await user.save();
-    res.json({ message: 'Password reset successful' });
+
+    await sendOtp(email, otp, 'reset');
+    res.json({ message: 'If that email exists, a reset code was sent', requiresOtp: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to send reset email' });
+  }
+});
+
+// Forgot password — Step 2: verify OTP + set new password
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    if (!email || !otp || !newPassword)
+      return res.status(400).json({ message: 'Email, OTP, and new password are required' });
+    if (newPassword.length < 6)
+      return res.status(400).json({ message: 'Password must be at least 6 characters' });
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: 'Account not found' });
+    if (!user.emailOtp || user.emailOtp !== otp)
+      return res.status(400).json({ message: 'Invalid or expired code' });
+    if (user.emailOtpExpiry < new Date())
+      return res.status(400).json({ message: 'Code expired. Please request a new one.' });
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.emailOtp = '';
+    user.emailOtpExpiry = null;
+    await user.save();
+
+    res.json({ message: 'Password reset successful. You can now log in.' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

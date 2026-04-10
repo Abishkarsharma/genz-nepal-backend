@@ -2,16 +2,51 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const mongoSanitize = require('express-mongo-sanitize');
+const helmet = require('helmet');
 require('dotenv').config();
+
+// ── Startup: fail fast if critical env vars are missing ──────────────────────
+const REQUIRED_ENV = ['MONGO_URI', 'JWT_SECRET'];
+REQUIRED_ENV.forEach((key) => {
+  if (!process.env[key]) {
+    console.error(`FATAL: Missing environment variable: ${key}`);
+    process.exit(1);
+  }
+});
 
 const app = express();
 
-// CORS — allow all origins (API is protected by JWT auth)
-app.use(cors({ origin: true, credentials: true }));
+// ── Security headers (helmet) ─────────────────────────────────────────────────
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow images to load
+}));
 
-app.use(express.json());
+// ── CORS — only allow your frontend ──────────────────────────────────────────
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:5173', // local dev
+  'http://localhost:3000',
+].filter(Boolean);
 
-// Rate limiting — protect auth routes from brute force
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials: true,
+}));
+
+app.use(express.json({ limit: '10mb' })); // limit body size
+
+// ── NoSQL injection sanitization ─────────────────────────────────────────────
+app.use(mongoSanitize());
+
+// ── Rate limiters ─────────────────────────────────────────────────────────────
+
+// Strict limiter for auth routes (login, signup, OTP)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 20,
@@ -20,36 +55,66 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Health check — Render pings this to keep the service alive
+// General API limiter — prevents scraping and abuse
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  message: { message: 'Too many requests, please slow down' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Strict limiter for order placement — prevents order spam
+const orderLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10,
+  message: { message: 'Too many orders placed, please wait a moment' },
+});
+
+// ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
-// Routes
-app.use('/api/products', require('./routes/products'));
+// ── Routes ────────────────────────────────────────────────────────────────────
+app.use('/api/products', generalLimiter, require('./routes/products'));
 app.use('/api/auth', authLimiter, require('./routes/auth'));
-app.use('/api/cart', require('./routes/cart'));
-app.use('/api/orders', require('./routes/orders'));
-app.use('/api/admin', require('./routes/admin'));
-app.use('/api/users', require('./routes/users'));
-app.use('/api/reviews', require('./routes/reviews'));
-app.use('/api/messages', require('./routes/messages'));
-app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/cart', generalLimiter, require('./routes/cart'));
+app.use('/api/orders', orderLimiter, require('./routes/orders'));
+app.use('/api/admin', generalLimiter, require('./routes/admin'));
+app.use('/api/users', generalLimiter, require('./routes/users'));
+app.use('/api/reviews', generalLimiter, require('./routes/reviews'));
+app.use('/api/messages', generalLimiter, require('./routes/messages'));
+app.use('/api/notifications', generalLimiter, require('./routes/notifications'));
 
+// ── Global error handler ──────────────────────────────────────────────────────
+app.use((err, req, res, next) => {
+  if (err.message?.startsWith('CORS blocked')) {
+    return res.status(403).json({ message: err.message });
+  }
+  console.error(err);
+  res.status(500).json({ message: 'Internal server error' });
+});
+
+// ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(async () => {
-    console.log('MongoDB connected');
-    const Product = require('./models/Product');
-    const count = await Product.countDocuments();
-    if (count === 0) {
-      await Product.insertMany(require('./seed'));
-      console.log('Sample products seeded');
-    }
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-      // Start keepalive pinger in production to prevent Render spin-down
-      if (process.env.NODE_ENV !== 'development') require('./keepalive');
-    });
-  })
-  .catch((err) => console.error(err));
+async function start() {
+  await mongoose.connect(process.env.MONGO_URI);
+  console.log('MongoDB connected');
+
+  const Product = require('./models/Product');
+  const count = await Product.countDocuments();
+  if (count === 0) {
+    await Product.insertMany(require('./seed'));
+    console.log('Sample products seeded');
+  }
+
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    if (process.env.NODE_ENV !== 'development') require('./keepalive');
+  });
+}
+
+start().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});
