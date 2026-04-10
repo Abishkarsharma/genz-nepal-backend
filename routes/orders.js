@@ -169,6 +169,9 @@ router.patch('/cancel/:id', protect, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
+// Get current user's orders
+router.get('/my', protect, async (req, res) => {
   try {
     const orders = await Order.find({ user: req.user.id }).sort({ createdAt: -1 });
     res.json(orders);
