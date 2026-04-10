@@ -47,10 +47,6 @@ router.get('/', async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
 
 // Public: get single product
 router.get('/:id', async (req, res) => {
