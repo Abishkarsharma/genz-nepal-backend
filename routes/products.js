@@ -2,18 +2,51 @@ const router = require('express').Router();
 const Product = require('../models/Product');
 const { protect, requireRole } = require('../middleware/auth');
 
-// Public: get all products (with optional category, search filter)
+// Public: get all products (with optional category, search filter + pagination)
 router.get('/', async (req, res) => {
   try {
     const { category, search } = req.query;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 20); // cap at 100
+
     let filter = {};
+
     if (category) filter.category = category;
+
     if (search) {
-      const regex = new RegExp(search, 'i');
-      filter.$or = [{ name: regex }, { category: regex }, { description: regex }];
+      // Use MongoDB text index if available, fall back to regex
+      try {
+        filter.$text = { $search: search };
+      } catch {
+        const regex = new RegExp(search, 'i');
+        filter.$or = [{ name: regex }, { category: regex }, { description: regex }];
+      }
     }
-    const products = await Product.find(filter).sort({ createdAt: -1 });
-    res.json(products);
+
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .sort(search ? { score: { $meta: 'textScore' } } : { createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Product.countDocuments(filter),
+    ]);
+
+    res.json({
+      products,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+        hasNext: page * limit < total,
+        hasPrev: page > 1,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

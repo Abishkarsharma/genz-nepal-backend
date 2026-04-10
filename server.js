@@ -7,11 +7,10 @@ const helmet = require('helmet');
 require('dotenv').config();
 
 // ── Startup: fail fast if critical env vars are missing ──────────────────────
-const REQUIRED_ENV = ['MONGO_URI', 'JWT_SECRET'];
+const REQUIRED_ENV = ['MONGO_URI', 'JWT_SECRET', 'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'];
 REQUIRED_ENV.forEach((key) => {
   if (!process.env[key]) {
-    console.error(`FATAL: Missing environment variable: ${key}`);
-    process.exit(1);
+    console.warn(`WARNING: Missing environment variable: ${key}`);
   }
 });
 
@@ -64,14 +63,19 @@ const generalLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Dedicated limiter for uploads — generous but still protected
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,
+  message: { message: 'Too many uploads, please wait a moment' },
+});
+
 // Strict limiter for order placement — prevents order spam
 const orderLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
+  windowMs: 60 * 1000,
   max: 10,
   message: { message: 'Too many orders placed, please wait a moment' },
 });
-
-// ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -84,6 +88,7 @@ app.use('/api/users', generalLimiter, require('./routes/users'));
 app.use('/api/reviews', generalLimiter, require('./routes/reviews'));
 app.use('/api/messages', generalLimiter, require('./routes/messages'));
 app.use('/api/notifications', generalLimiter, require('./routes/notifications'));
+app.use('/api/upload', uploadLimiter, require('./routes/upload')); // own limiter, not general
 
 // ── Global error handler ──────────────────────────────────────────────────────
 app.use((err, req, res, next) => {

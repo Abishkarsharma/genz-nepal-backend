@@ -36,4 +36,10 @@ const orderSchema = new mongoose.Schema({
   status: { type: String, default: 'pending' },
 }, { timestamps: true });
 
+// ── Indexes ───────────────────────────────────────────────────────────────────
+orderSchema.index({ user: 1, createdAt: -1 });           // my orders page
+orderSchema.index({ 'items.product': 1 });               // seller orders lookup
+orderSchema.index({ status: 1, createdAt: -1 });         // admin filter by status
+orderSchema.index({ createdAt: -1 });                    // admin all orders sorted
+
 module.exports = mongoose.model('Order', orderSchema);
