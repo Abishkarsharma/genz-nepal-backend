@@ -88,7 +88,8 @@ app.use('/api/users', generalLimiter, require('./routes/users'));
 app.use('/api/reviews', generalLimiter, require('./routes/reviews'));
 app.use('/api/messages', generalLimiter, require('./routes/messages'));
 app.use('/api/notifications', generalLimiter, require('./routes/notifications'));
-app.use('/api/upload', uploadLimiter, require('./routes/upload')); // own limiter, not general
+app.use('/api/upload', uploadLimiter, require('./routes/upload'));
+app.use('/api/esewa', generalLimiter, require('./routes/esewa'));
 
 // ── Global error handler ──────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
