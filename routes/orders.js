@@ -4,10 +4,23 @@ const Order = require('../models/Order');
 const Product = require('../models/Product');
 const Notification = require('../models/Notification');
 
-// Place order — notify sellers of their products
+// Place order — validate stock, notify sellers
 router.post('/', protect, async (req, res) => {
   try {
     const { items, shippingAddress, paymentMethod, paymentStatus, paymentRef, subtotal, shipping } = req.body;
+
+    // Validate stock for every item before creating order
+    for (const item of items) {
+      if (!item.product) continue;
+      const product = await Product.findById(item.product).select('stock name');
+      if (!product) return res.status(404).json({ message: `Product not found: ${item.name}` });
+      if (product.stock < item.quantity) {
+        return res.status(400).json({
+          message: `Only ${product.stock} unit${product.stock !== 1 ? 's' : ''} of "${product.name}" available. Please update your cart.`,
+        });
+      }
+    }
+
     const total = subtotal + (shipping || 250);
     const order = await Order.create({
       user: req.user.id,
@@ -21,6 +34,12 @@ router.post('/', protect, async (req, res) => {
       tax: 0,
       total,
     });
+
+    // Deduct stock for each item
+    for (const item of items) {
+      if (!item.product) continue;
+      await Product.findByIdAndUpdate(item.product, { $inc: { stock: -item.quantity } });
+    }
 
     // Notify each seller whose product was ordered
     const sellerNotified = new Set();
