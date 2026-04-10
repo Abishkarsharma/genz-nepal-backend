@@ -9,6 +9,9 @@ const userSchema = new mongoose.Schema({
   phone: { type: String, default: '' },
   address: { type: String, default: '' },
   city: { type: String, default: '' },
+  emailVerified: { type: Boolean, default: false },
+  emailOtp: { type: String, default: '' },
+  emailOtpExpiry: { type: Date },
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

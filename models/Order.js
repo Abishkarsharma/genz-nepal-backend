@@ -14,8 +14,14 @@ const orderSchema = new mongoose.Schema({
   shippingAddress: {
     fullName: String,
     phone: String,
+    email: String,
+    province: String,
     city: String,
-    address: String,
+    district: String,
+    area: String,
+    street: String,
+    landmark: String,
+    postalCode: String,
   },
   paymentMethod: {
     type: String,
@@ -26,7 +32,6 @@ const orderSchema = new mongoose.Schema({
   paymentRef: { type: String, default: '' },
   subtotal: Number,
   shipping: { type: Number, default: 250 },
-  tax: { type: Number, default: 0 },
   total: Number,
   status: { type: String, default: 'pending' },
 }, { timestamps: true });
