@@ -3,6 +3,7 @@ const Product = require('../models/Product');
 const { protect, requireRole } = require('../middleware/auth');
 
 // Public: get all products (with optional category, search filter + pagination)
+// v2 — fixed syntax
 router.get('/', async (req, res) => {
   try {
     const { category, search } = req.query;
