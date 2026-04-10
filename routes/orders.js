@@ -14,8 +14,8 @@ router.post('/verify-esewa', protect, async (req, res) => {
 
     // eSewa verification API (test environment)
     const verifyUrl = process.env.ESEWA_ENV === 'production'
-      ? 'https://esewa.com.np/epay/transrec'
-      : 'https://uat.esewa.com.np/epay/transrec';
+      ? 'https://esewa.com.np/api/epay/transaction/status/'
+      : 'https://rc-epay.esewa.com.np/api/epay/transaction/status/';
 
     const params = new URLSearchParams({
       amt: amount,
