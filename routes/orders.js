@@ -3,6 +3,80 @@ const { protect, requireRole } = require('../middleware/auth');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
 const Notification = require('../models/Notification');
+const { sendOrderConfirmation } = require('../utils/orderEmail');
+const User = require('../models/User');
+
+// ── eSewa payment verification ────────────────────────────────────────────────
+// After eSewa redirects back, verify the payment server-side
+router.post('/verify-esewa', protect, async (req, res) => {
+  try {
+    const { token: esewaToken, amount, orderId } = req.body;
+
+    // eSewa verification API (test environment)
+    const verifyUrl = process.env.ESEWA_ENV === 'production'
+      ? 'https://esewa.com.np/epay/transrec'
+      : 'https://uat.esewa.com.np/epay/transrec';
+
+    const params = new URLSearchParams({
+      amt: amount,
+      scd: process.env.ESEWA_MERCHANT_CODE || 'EPAYTEST',
+      rid: esewaToken,
+      pid: orderId,
+    });
+
+    const response = await fetch(`${verifyUrl}?${params}`);
+    const text = await response.text();
+
+    if (text.includes('<response>Success</response>')) {
+      // Mark order as paid
+      const order = await Order.findByIdAndUpdate(
+        orderId,
+        { paymentStatus: 'paid', paymentRef: esewaToken },
+        { new: true }
+      );
+      return res.json({ success: true, order });
+    }
+
+    res.status(400).json({ success: false, message: 'eSewa payment verification failed' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── Khalti payment verification ───────────────────────────────────────────────
+router.post('/verify-khalti', protect, async (req, res) => {
+  try {
+    const { token: khaltiToken, amount, orderId } = req.body;
+
+    const verifyUrl = process.env.KHALTI_ENV === 'production'
+      ? 'https://khalti.com/api/v2/payment/verify/'
+      : 'https://dev.khalti.com/api/v2/payment/verify/';
+
+    const response = await fetch(verifyUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${process.env.KHALTI_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ token: khaltiToken, amount }), // amount in paisa
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.idx) {
+      const order = await Order.findByIdAndUpdate(
+        orderId,
+        { paymentStatus: 'paid', paymentRef: data.idx },
+        { new: true }
+      );
+      return res.json({ success: true, order });
+    }
+
+    res.status(400).json({ success: false, message: data.detail || 'Khalti verification failed' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 
 // Place order — validate stock, notify sellers
 router.post('/', protect, async (req, res) => {
@@ -57,6 +131,14 @@ router.post('/', protect, async (req, res) => {
         body: `${req.user.name} ordered ${item.name} × ${item.quantity} — NPR ${item.price * item.quantity}`,
         orderId: order._id,
       });
+    }
+
+    // Send order confirmation email to customer (non-blocking)
+    const customer = await User.findById(req.user.id).select('email name');
+    if (customer?.email) {
+      sendOrderConfirmation(order, customer.email, customer.name).catch((err) =>
+        console.error('Order email failed:', err.message)
+      );
     }
 
     res.status(201).json(order);
