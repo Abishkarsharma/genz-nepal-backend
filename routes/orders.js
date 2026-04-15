@@ -240,6 +240,18 @@ router.patch('/seller/:id/status', protect, requireRole('seller', 'admin'), asyn
 
     order.status = req.body.status;
     await order.save();
+
+    // Notify customer about status change
+    if (order.user) {
+      await Notification.create({
+        recipient: order.user,
+        type: 'order_status',
+        title: `Order ${req.body.status.charAt(0).toUpperCase() + req.body.status.slice(1)}`,
+        body: `Your order #${String(order._id).slice(-8).toUpperCase()} is now ${req.body.status}.`,
+        orderId: order._id,
+      });
+    }
+
     res.json(order);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -266,6 +278,18 @@ router.patch('/:id/status', protect, requireRole('admin'), async (req, res) => {
       { status: req.body.status },
       { new: true }
     );
+
+    // Notify customer about status change
+    if (order?.user) {
+      await Notification.create({
+        recipient: order.user,
+        type: 'order_status',
+        title: `Order ${req.body.status.charAt(0).toUpperCase() + req.body.status.slice(1)}`,
+        body: `Your order #${String(order._id).slice(-8).toUpperCase()} is now ${req.body.status}.`,
+        orderId: order._id,
+      });
+    }
+
     res.json(order);
   } catch (err) {
     res.status(500).json({ message: err.message });
