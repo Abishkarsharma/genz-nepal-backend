@@ -95,7 +95,7 @@ router.post('/', protect, async (req, res) => {
       }
     }
 
-    const total = subtotal + (shipping || 250);
+    const total = subtotal + (shipping || 80);
     const order = await Order.create({
       user: req.user.id,
       items,
@@ -104,7 +104,7 @@ router.post('/', protect, async (req, res) => {
       paymentStatus: paymentStatus || 'pending',
       paymentRef: paymentRef || '',
       subtotal,
-      shipping: shipping || 250,
+      shipping: shipping || 80,
       tax: 0,
       total,
     });

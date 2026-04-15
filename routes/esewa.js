@@ -16,7 +16,7 @@ function generateEsewaSignature(message, secret) {
 router.post('/initiate', protect, async (req, res) => {
   try {
     const { items, shippingAddress, subtotal, shipping } = req.body;
-    const total = subtotal + (shipping || 250);
+    const total = subtotal + (shipping || 80);
 
     // Validate stock
     for (const item of items) {
