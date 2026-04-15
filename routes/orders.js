@@ -116,36 +116,38 @@ router.post('/', protect, async (req, res) => {
     }
 
     // Notify each seller whose product was ordered + send seller email
-    const sellerNotified = new Set();
-    const sellerItemsMap = {}; // { sellerId: [items] }
+    const sellerItemsMap = new Map(); // Map<sellerId ObjectId string, { sellerObjId, items[] }>
 
     for (const item of items) {
       if (!item.product) continue;
       const product = await Product.findById(item.product).select('createdBy name');
       if (!product?.createdBy) continue;
-      const sellerId = String(product.createdBy);
-      if (!sellerItemsMap[sellerId]) sellerItemsMap[sellerId] = [];
-      sellerItemsMap[sellerId].push(item);
+      const sellerKey = String(product.createdBy);
+      if (!sellerItemsMap.has(sellerKey)) {
+        sellerItemsMap.set(sellerKey, { sellerObjId: product.createdBy, items: [] });
+      }
+      sellerItemsMap.get(sellerKey).items.push(item);
     }
 
-    for (const [sellerId, sellerItems] of Object.entries(sellerItemsMap)) {
-      if (sellerNotified.has(sellerId)) continue;
-      sellerNotified.add(sellerId);
-
+    for (const { sellerObjId, items: sellerItems } of sellerItemsMap.values()) {
       // Build notification body listing all items
       const itemSummary = sellerItems.map((i) => `${i.name} ×${i.quantity}`).join(', ');
       const sellerTotal = sellerItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
-      await Notification.create({
-        recipient: sellerId,
-        type: 'new_order',
-        title: '🛒 New Order Received!',
-        body: `${req.user.name} ordered: ${itemSummary} — NPR ${sellerTotal.toLocaleString()}`,
-        orderId: order._id,
-      });
+      try {
+        await Notification.create({
+          recipient: sellerObjId,           // ObjectId — not a string
+          type: 'new_order',
+          title: '🛒 New Order Received!',
+          body: `${req.user.name} ordered: ${itemSummary} — NPR ${sellerTotal.toLocaleString()}`,
+          orderId: order._id,
+        });
+      } catch (notifErr) {
+        console.error('Seller notification failed:', notifErr.message);
+      }
 
       // Send email alert to seller
-      const seller = await User.findById(sellerId).select('email name');
+      const seller = await User.findById(sellerObjId).select('email name');
       if (seller?.email) {
         sendSellerOrderAlert(order, seller.email, seller.name, sellerItems, req.user.name, req.user.phone)
           .catch((err) => console.error('Seller email failed:', err.message));
@@ -158,6 +160,20 @@ router.post('/', protect, async (req, res) => {
       sendOrderConfirmation(order, customer.email, customer.name).catch((err) =>
         console.error('Order email failed:', err.message)
       );
+    }
+
+    // Also notify customer in-app
+    try {
+      const itemSummaryCustomer = items.map((i) => `${i.name} ×${i.quantity}`).join(', ');
+      await Notification.create({
+        recipient: req.user.id,
+        type: 'new_order',
+        title: '✅ Order Placed Successfully!',
+        body: `Your order #${String(order._id).slice(-8).toUpperCase()} has been placed. Items: ${itemSummaryCustomer}`,
+        orderId: order._id,
+      });
+    } catch (notifErr) {
+      console.error('Customer notification failed:', notifErr.message);
     }
 
     res.status(201).json(order);
@@ -192,21 +208,25 @@ router.patch('/cancel/:id', protect, async (req, res) => {
     await order.save();
 
     // Notify each seller whose product was in this order
-    const sellerNotified = new Set();
+    const sellerNotifiedCancel = new Set();
     for (const item of order.items) {
       if (!item.product) continue;
       const product = await Product.findById(item.product).select('createdBy');
       if (!product?.createdBy) continue;
       const sid = String(product.createdBy);
-      if (sellerNotified.has(sid)) continue;
-      sellerNotified.add(sid);
-      await Notification.create({
-        recipient: product.createdBy,
-        type: 'order_status',
-        title: '❌ Order Cancelled by Customer',
-        body: `Order #${String(order._id).slice(-8).toUpperCase()} was cancelled. Reason: ${cancelReason}${cancelNote ? ` — "${cancelNote}"` : ''}`,
-        orderId: order._id,
-      });
+      if (sellerNotifiedCancel.has(sid)) continue;
+      sellerNotifiedCancel.add(sid);
+      try {
+        await Notification.create({
+          recipient: product.createdBy,     // ObjectId — not a string
+          type: 'order_status',
+          title: '❌ Order Cancelled by Customer',
+          body: `Order #${String(order._id).slice(-8).toUpperCase()} was cancelled. Reason: ${cancelReason}${cancelNote ? ` — "${cancelNote}"` : ''}`,
+          orderId: order._id,
+        });
+      } catch (notifErr) {
+        console.error('Cancel notification failed:', notifErr.message);
+      }
     }
 
     res.json({ message: 'Order cancelled successfully', order });
