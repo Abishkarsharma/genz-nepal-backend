@@ -34,12 +34,16 @@ const orderSchema = new mongoose.Schema({
   shipping: { type: Number, default: 250 },
   total: Number,
   status: { type: String, default: 'pending' },
+  // Cancellation details
+  cancelReason: { type: String, default: '' },
+  cancelNote: { type: String, default: '' },
+  cancelledAt: { type: Date, default: null },
+  cancelledBy: { type: String, enum: ['customer', 'seller', 'admin', ''], default: '' },
 }, { timestamps: true });
 
-// ── Indexes ───────────────────────────────────────────────────────────────────
-orderSchema.index({ user: 1, createdAt: -1 });           // my orders page
-orderSchema.index({ 'items.product': 1 });               // seller orders lookup
-orderSchema.index({ status: 1, createdAt: -1 });         // admin filter by status
-orderSchema.index({ createdAt: -1 });                    // admin all orders sorted
+orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ 'items.product': 1 });
+orderSchema.index({ status: 1, createdAt: -1 });
+orderSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Order', orderSchema);

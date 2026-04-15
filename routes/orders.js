@@ -175,6 +175,9 @@ router.patch('/cancel/:id', protect, async (req, res) => {
       return res.status(400).json({ message: `Cannot cancel an order that is already ${order.status}` });
     }
 
+    const { cancelReason, cancelNote } = req.body;
+    if (!cancelReason) return res.status(400).json({ message: 'Please select a cancellation reason' });
+
     // Restore stock for each item
     for (const item of order.items) {
       if (!item.product) continue;
@@ -182,7 +185,30 @@ router.patch('/cancel/:id', protect, async (req, res) => {
     }
 
     order.status = 'cancelled';
+    order.cancelReason = cancelReason;
+    order.cancelNote = cancelNote || '';
+    order.cancelledAt = new Date();
+    order.cancelledBy = 'customer';
     await order.save();
+
+    // Notify each seller whose product was in this order
+    const sellerNotified = new Set();
+    for (const item of order.items) {
+      if (!item.product) continue;
+      const product = await Product.findById(item.product).select('createdBy');
+      if (!product?.createdBy) continue;
+      const sid = String(product.createdBy);
+      if (sellerNotified.has(sid)) continue;
+      sellerNotified.add(sid);
+      await Notification.create({
+        recipient: product.createdBy,
+        type: 'order_status',
+        title: '❌ Order Cancelled by Customer',
+        body: `Order #${String(order._id).slice(-8).toUpperCase()} was cancelled. Reason: ${cancelReason}${cancelNote ? ` — "${cancelNote}"` : ''}`,
+        orderId: order._id,
+      });
+    }
+
     res.json({ message: 'Order cancelled successfully', order });
   } catch (err) {
     res.status(500).json({ message: err.message });
