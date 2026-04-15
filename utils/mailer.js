@@ -1,23 +1,11 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-// Validate env vars at startup
-if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-  console.warn('⚠️  EMAIL_USER or EMAIL_PASS not set — OTP emails will fail');
-}
+// Resend works on Render — Gmail SMTP is blocked by Render's network
+// Get free API key at resend.com (100 emails/day free)
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
-function createTransporter() {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-    // Explicit connection settings for reliability
-    pool: false,
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-  });
+if (!process.env.RESEND_API_KEY) {
+  console.warn('⚠️  RESEND_API_KEY not set — OTP emails will fail');
 }
 
 const SUBJECTS = {
@@ -36,20 +24,23 @@ const SUBTITLES = {
 };
 
 async function sendOtp(to, otp, type = 'signup') {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    throw new Error('EMAIL_USER or EMAIL_PASS environment variable is not set');
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error('RESEND_API_KEY environment variable is not set');
   }
 
   const subject = SUBJECTS[type] || SUBJECTS.signup;
   const title = TITLES[type] || TITLES.signup;
   const subtitle = SUBTITLES[type] || SUBTITLES.signup;
 
-  // Create a fresh transporter each time to avoid stale connections
-  const transporter = createTransporter();
+  // Resend requires a verified domain OR use onboarding@resend.dev for testing
+  // For production: verify your domain at resend.com/domains
+  const fromEmail = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 
-  const info = await transporter.sendMail({
-    from: `"Gen.Z Nepal" <${process.env.EMAIL_USER}>`,
-    to,
+  const resendClient = new Resend(process.env.RESEND_API_KEY);
+
+  const { data, error } = await resendClient.emails.send({
+    from: `Gen.Z Nepal <${fromEmail}>`,
+    to: [to],
     subject,
     html: `
       <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;border:1px solid #eee">
@@ -73,19 +64,27 @@ async function sendOtp(to, otp, type = 'signup') {
     `,
   });
 
-  console.log(`✅ OTP email sent to ${to} — messageId: ${info.messageId}`);
-  return info;
+  if (error) {
+    console.error(`❌ Resend email FAILED for ${to}:`, error);
+    throw new Error(error.message || 'Email send failed');
+  }
+
+  console.log(`✅ OTP email sent to ${to} via Resend — id: ${data?.id}`);
+  return data;
 }
 
-// Test email connectivity — call this to diagnose issues
 async function testEmailConnection() {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    return { ok: false, error: 'EMAIL_USER or EMAIL_PASS not set in environment' };
+  if (!process.env.RESEND_API_KEY) {
+    return { ok: false, error: 'RESEND_API_KEY not set in environment variables' };
   }
   try {
-    const transporter = createTransporter();
-    await transporter.verify();
-    return { ok: true, user: process.env.EMAIL_USER };
+    // Test by checking if the API key is valid
+    const testResend = new Resend(process.env.RESEND_API_KEY);
+    // Resend doesn't have a verify endpoint, so we just check the key format
+    if (process.env.RESEND_API_KEY.startsWith('re_')) {
+      return { ok: true, service: 'Resend', note: 'API key format valid' };
+    }
+    return { ok: false, error: 'RESEND_API_KEY should start with re_' };
   } catch (err) {
     return { ok: false, error: err.message };
   }
