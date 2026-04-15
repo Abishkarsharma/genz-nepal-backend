@@ -32,6 +32,8 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'Name, email and password are required' });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       return res.status(400).json({ message: 'Invalid email format' });
+    if (!email.toLowerCase().endsWith('@gmail.com'))
+      return res.status(400).json({ message: 'Only Gmail addresses (@gmail.com) are accepted' });
     if (password.length < 6)
       return res.status(400).json({ message: 'Password must be at least 6 characters' });
 
@@ -104,8 +106,16 @@ router.post('/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(400).json({ message: 'Invalid credentials' });
 
-    if (!user.emailVerified)
-      return res.status(403).json({ message: 'Please verify your email first', requiresVerification: true, email });
+    // Auto-verify accounts that existed before OTP system (admin, old accounts)
+    if (!user.emailVerified) {
+      // Allow admin accounts and accounts with no OTP pending (pre-existing accounts)
+      if (user.role === 'admin' || (!user.emailOtp && !user.emailOtpExpiry)) {
+        user.emailVerified = true;
+        await user.save();
+      } else {
+        return res.status(403).json({ message: 'Please verify your email first', requiresVerification: true, email });
+      }
+    }
 
     res.json({ token: signToken(user), user: userPayload(user) });
   } catch (err) {
