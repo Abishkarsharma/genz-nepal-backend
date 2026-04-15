@@ -11,6 +11,6 @@ function ping() {
   });
 }
 
-// Ping every 14 minutes (840,000ms)
-setInterval(ping, 14 * 60 * 1000);
+// Ping every 10 minutes to keep Render free tier awake
+setInterval(ping, 10 * 60 * 1000);
 ping(); // immediate first ping on startup

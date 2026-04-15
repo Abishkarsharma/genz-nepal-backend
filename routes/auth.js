@@ -51,17 +51,7 @@ router.post('/signup', async (req, res) => {
     const hashed = await bcrypt.hash(password, 10);
     const safeRole = ['seller'].includes(role) ? role : 'user';
 
-    // Try sending email FIRST — if it fails, don't create account
-    try {
-      await sendOtp(email, otp);
-    } catch (emailErr) {
-      console.error('Email send failed:', emailErr.message);
-      return res.status(500).json({
-        message: 'Could not send verification email. Please check your Gmail address and try again.',
-      });
-    }
-
-    // Email sent successfully — now save/update the account
+    // Save/update the account
     if (exists && !exists.emailVerified) {
       exists.name = name;
       exists.password = hashed;
@@ -76,14 +66,15 @@ router.post('/signup', async (req, res) => {
       });
     }
 
+    // Send email non-blocking — respond immediately, email sends in background
+    sendOtp(email, otp).catch((err) => console.error('OTP email failed:', err.message));
+
     res.json({ message: 'Verification code sent to your Gmail', requiresVerification: true });
   } catch (err) {
     console.error('Signup error:', err);
     res.status(500).json({ message: 'Signup failed. Please try again.' });
   }
 });
-
-// Step 2: Verify OTP
 router.post('/verify-otp', async (req, res) => {
   try {
     const { email, otp } = req.body;
