@@ -3,7 +3,7 @@ const { protect, requireRole } = require('../middleware/auth');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
 const Notification = require('../models/Notification');
-const { sendOrderConfirmation } = require('../utils/orderEmail');
+const { sendOrderConfirmation, sendSellerOrderAlert } = require('../utils/orderEmail');
 const User = require('../models/User');
 
 // ── eSewa payment verification ────────────────────────────────────────────────
@@ -115,22 +115,41 @@ router.post('/', protect, async (req, res) => {
       await Product.findByIdAndUpdate(item.product, { $inc: { stock: -item.quantity } });
     }
 
-    // Notify each seller whose product was ordered
+    // Notify each seller whose product was ordered + send seller email
     const sellerNotified = new Set();
+    const sellerItemsMap = {}; // { sellerId: [items] }
+
     for (const item of items) {
       if (!item.product) continue;
       const product = await Product.findById(item.product).select('createdBy name');
       if (!product?.createdBy) continue;
       const sellerId = String(product.createdBy);
+      if (!sellerItemsMap[sellerId]) sellerItemsMap[sellerId] = [];
+      sellerItemsMap[sellerId].push(item);
+    }
+
+    for (const [sellerId, sellerItems] of Object.entries(sellerItemsMap)) {
       if (sellerNotified.has(sellerId)) continue;
       sellerNotified.add(sellerId);
+
+      // Build notification body listing all items
+      const itemSummary = sellerItems.map((i) => `${i.name} ×${i.quantity}`).join(', ');
+      const sellerTotal = sellerItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+
       await Notification.create({
-        recipient: product.createdBy,
+        recipient: sellerId,
         type: 'new_order',
-        title: 'New Order Received!',
-        body: `${req.user.name} ordered ${item.name} × ${item.quantity} — NPR ${item.price * item.quantity}`,
+        title: '🛒 New Order Received!',
+        body: `${req.user.name} ordered: ${itemSummary} — NPR ${sellerTotal.toLocaleString()}`,
         orderId: order._id,
       });
+
+      // Send email alert to seller
+      const seller = await User.findById(sellerId).select('email name');
+      if (seller?.email) {
+        sendSellerOrderAlert(order, seller.email, seller.name, sellerItems, req.user.name, req.user.phone)
+          .catch((err) => console.error('Seller email failed:', err.message));
+      }
     }
 
     // Send order confirmation email to customer (non-blocking)
