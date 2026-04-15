@@ -3,7 +3,17 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { protect, requireRole } = require('../middleware/auth');
-const { sendOtp } = require('../utils/mailer');
+const { sendOtp, testEmailConnection } = require('../utils/mailer');
+
+// Email diagnostic endpoint — admin only, helps debug email issues
+router.get('/test-email', async (req, res) => {
+  const result = await testEmailConnection();
+  if (result.ok) {
+    res.json({ status: 'Email service working', from: result.user });
+  } else {
+    res.status(500).json({ status: 'Email service FAILED', error: result.error });
+  }
+});
 
 const signToken = (user) =>
   jwt.sign(
@@ -67,7 +77,10 @@ router.post('/signup', async (req, res) => {
     }
 
     // Send email non-blocking — respond immediately, email sends in background
-    sendOtp(email, otp).catch((err) => console.error('OTP email failed:', err.message));
+    sendOtp(email, otp).catch((err) => {
+      console.error(`❌ OTP email FAILED for ${email}:`, err.message);
+      console.error('Check EMAIL_USER and EMAIL_PASS in Render environment variables');
+    });
 
     res.json({ message: 'Verification code sent to your Gmail', requiresVerification: true });
   } catch (err) {

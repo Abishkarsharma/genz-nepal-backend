@@ -1,12 +1,24 @@
 const nodemailer = require('nodemailer');
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+// Validate env vars at startup
+if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+  console.warn('⚠️  EMAIL_USER or EMAIL_PASS not set — OTP emails will fail');
+}
+
+function createTransporter() {
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+    // Explicit connection settings for reliability
+    pool: false,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+  });
+}
 
 const SUBJECTS = {
   signup: 'Verify your email — Gen.Z Nepal',
@@ -24,11 +36,18 @@ const SUBTITLES = {
 };
 
 async function sendOtp(to, otp, type = 'signup') {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    throw new Error('EMAIL_USER or EMAIL_PASS environment variable is not set');
+  }
+
   const subject = SUBJECTS[type] || SUBJECTS.signup;
   const title = TITLES[type] || TITLES.signup;
   const subtitle = SUBTITLES[type] || SUBTITLES.signup;
 
-  await transporter.sendMail({
+  // Create a fresh transporter each time to avoid stale connections
+  const transporter = createTransporter();
+
+  const info = await transporter.sendMail({
     from: `"Gen.Z Nepal" <${process.env.EMAIL_USER}>`,
     to,
     subject,
@@ -53,6 +72,23 @@ async function sendOtp(to, otp, type = 'signup') {
       </div>
     `,
   });
+
+  console.log(`✅ OTP email sent to ${to} — messageId: ${info.messageId}`);
+  return info;
 }
 
-module.exports = { sendOtp };
+// Test email connectivity — call this to diagnose issues
+async function testEmailConnection() {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    return { ok: false, error: 'EMAIL_USER or EMAIL_PASS not set in environment' };
+  }
+  try {
+    const transporter = createTransporter();
+    await transporter.verify();
+    return { ok: true, user: process.env.EMAIL_USER };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+module.exports = { sendOtp, testEmailConnection };
