@@ -3,17 +3,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { protect, requireRole } = require('../middleware/auth');
-const { sendOtp, testEmailConnection } = require('../utils/mailer');
-
-// Email diagnostic endpoint — admin only, helps debug email issues
-router.get('/test-email', async (req, res) => {
-  const result = await testEmailConnection();
-  if (result.ok) {
-    res.json({ status: 'Email service working', from: result.user });
-  } else {
-    res.status(500).json({ status: 'Email service FAILED', error: result.error });
-  }
-});
 
 const signToken = (user) =>
   jwt.sign(
@@ -29,11 +18,7 @@ const userPayload = (user) => ({
   role: user.role,
 });
 
-function generateOtp() {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
-
-// Step 1: Register — send OTP (email first, save to DB only if email succeeds)
+// Signup — direct, no OTP (email verification removed due to SMTP restrictions)
 router.post('/signup', async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
@@ -47,69 +32,37 @@ router.post('/signup', async (req, res) => {
     if (password.length < 6)
       return res.status(400).json({ message: 'Password must be at least 6 characters' });
 
-    // Check if EMAIL is configured — fail fast with clear message
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      return res.status(500).json({ message: 'Email service not configured. Contact admin.' });
-    }
-
     const exists = await User.findOne({ email });
     if (exists && exists.emailVerified)
       return res.status(400).json({ message: 'Email already registered. Please sign in.' });
 
-    const otp = generateOtp();
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
     const hashed = await bcrypt.hash(password, 10);
     const safeRole = ['seller'].includes(role) ? role : 'user';
 
-    // Save/update the account
-    if (exists && !exists.emailVerified) {
+    let user;
+    if (exists) {
       exists.name = name;
       exists.password = hashed;
       exists.role = safeRole;
-      exists.emailOtp = otp;
-      exists.emailOtpExpiry = otpExpiry;
+      exists.emailVerified = true;
       await exists.save();
+      user = exists;
     } else {
-      await User.create({
-        name, email, password: hashed, role: safeRole,
-        emailOtp: otp, emailOtpExpiry: otpExpiry, emailVerified: false,
+      user = await User.create({
+        name, email, password: hashed, role: safeRole, emailVerified: true,
       });
     }
 
-    // Send email non-blocking — respond immediately, email sends in background
-    sendOtp(email, otp).catch((err) => {
-      console.error(`❌ OTP email FAILED for ${email}:`, err.message);
-      console.error('Check EMAIL_USER and EMAIL_PASS in Render environment variables');
-    });
-
-    res.json({ message: 'Verification code sent to your Gmail', requiresVerification: true });
+    res.json({ token: signToken(user), user: userPayload(user) });
   } catch (err) {
     console.error('Signup error:', err);
     res.status(500).json({ message: 'Signup failed. Please try again.' });
   }
 });
+
+// Keep verify-otp endpoint for backward compatibility (always succeeds now)
 router.post('/verify-otp', async (req, res) => {
-  try {
-    const { email, otp } = req.body;
-    if (!email || !otp) return res.status(400).json({ message: 'Email and OTP are required' });
-
-    const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ message: 'Account not found' });
-    if (user.emailVerified) return res.status(400).json({ message: 'Email already verified' });
-    if (!user.emailOtp || user.emailOtp !== otp)
-      return res.status(400).json({ message: 'Invalid OTP' });
-    if (user.emailOtpExpiry < new Date())
-      return res.status(400).json({ message: 'OTP expired. Please sign up again.' });
-
-    user.emailVerified = true;
-    user.emailOtp = '';
-    user.emailOtpExpiry = null;
-    await user.save();
-
-    res.json({ token: signToken(user), user: userPayload(user) });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+  res.status(400).json({ message: 'OTP verification is not required. Please sign up again.' });
 });
 
 // Login
@@ -124,15 +77,10 @@ router.post('/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(400).json({ message: 'Invalid credentials' });
 
-    // Auto-verify accounts that existed before OTP system (admin, old accounts)
+    // Auto-verify old accounts
     if (!user.emailVerified) {
-      // Allow admin accounts and accounts with no OTP pending (pre-existing accounts)
-      if (user.role === 'admin' || (!user.emailOtp && !user.emailOtpExpiry)) {
-        user.emailVerified = true;
-        await user.save();
-      } else {
-        return res.status(403).json({ message: 'Please verify your email first', requiresVerification: true, email });
-      }
+      user.emailVerified = true;
+      await user.save();
     }
 
     res.json({ token: signToken(user), user: userPayload(user) });
@@ -183,54 +131,39 @@ router.post('/setup-admin', async (req, res) => {
   }
 });
 
-// Forgot password — Step 1: send OTP
+// Forgot password — direct reset (no OTP)
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ message: 'Email is required' });
-
     const user = await User.findOne({ email });
-    // Always respond the same way — don't reveal if email exists (security)
-    if (!user) return res.json({ message: 'If that email exists, a reset code was sent' });
-
-    const otp = generateOtp();
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
-    user.emailOtp = otp;
-    user.emailOtpExpiry = otpExpiry;
-    await user.save();
-
-    await sendOtp(email, otp, 'reset');
-    res.json({ message: 'If that email exists, a reset code was sent', requiresOtp: true });
+    if (!user) return res.json({ message: 'If that email exists, a reset link was sent' });
+    // Return a temp token for password reset
+    const resetToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '15m' });
+    res.json({ message: 'Reset token generated', resetToken, requiresOtp: false });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Failed to send reset email' });
+    res.status(500).json({ message: err.message });
   }
 });
 
-// Forgot password — Step 2: verify OTP + set new password
+// Reset password with token
 router.post('/reset-password', async (req, res) => {
   try {
-    const { email, otp, newPassword } = req.body;
-    if (!email || !otp || !newPassword)
-      return res.status(400).json({ message: 'Email, OTP, and new password are required' });
+    const { resetToken, newPassword } = req.body;
+    if (!resetToken || !newPassword)
+      return res.status(400).json({ message: 'Token and new password are required' });
     if (newPassword.length < 6)
       return res.status(400).json({ message: 'Password must be at least 6 characters' });
 
-    const user = await User.findOne({ email });
+    const decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
     if (!user) return res.status(404).json({ message: 'Account not found' });
-    if (!user.emailOtp || user.emailOtp !== otp)
-      return res.status(400).json({ message: 'Invalid or expired code' });
-    if (user.emailOtpExpiry < new Date())
-      return res.status(400).json({ message: 'Code expired. Please request a new one.' });
 
     user.password = await bcrypt.hash(newPassword, 10);
-    user.emailOtp = '';
-    user.emailOtpExpiry = null;
     await user.save();
-
     res.json({ message: 'Password reset successful. You can now log in.' });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: 'Invalid or expired reset token' });
   }
 });
 
