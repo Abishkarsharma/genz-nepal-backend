@@ -1,9 +1,5 @@
 const { Resend } = require('resend');
 
-// Resend works on Render — Gmail SMTP is blocked by Render's network
-// Get free API key at resend.com (100 emails/day free)
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-
 if (!process.env.RESEND_API_KEY) {
   console.warn('⚠️  RESEND_API_KEY not set — OTP emails will fail');
 }
@@ -28,17 +24,17 @@ async function sendOtp(to, otp, type = 'signup') {
     throw new Error('RESEND_API_KEY environment variable is not set');
   }
 
+  const resend = new Resend(process.env.RESEND_API_KEY);
   const subject = SUBJECTS[type] || SUBJECTS.signup;
   const title = TITLES[type] || TITLES.signup;
   const subtitle = SUBTITLES[type] || SUBTITLES.signup;
 
-  // Resend requires a verified domain OR use onboarding@resend.dev for testing
-  // For production: verify your domain at resend.com/domains
+  // Use onboarding@resend.dev for testing (works for any recipient on paid plan)
+  // For free plan: can only send to your own verified email
+  // To send to anyone: verify a domain at resend.com/domains
   const fromEmail = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 
-  const resendClient = new Resend(process.env.RESEND_API_KEY);
-
-  const { data, error } = await resendClient.emails.send({
+  const { data, error } = await resend.emails.send({
     from: `Gen.Z Nepal <${fromEmail}>`,
     to: [to],
     subject,
@@ -65,7 +61,7 @@ async function sendOtp(to, otp, type = 'signup') {
   });
 
   if (error) {
-    console.error(`❌ Resend email FAILED for ${to}:`, error);
+    console.error(`❌ Resend email FAILED for ${to}:`, JSON.stringify(error));
     throw new Error(error.message || 'Email send failed');
   }
 
@@ -77,17 +73,15 @@ async function testEmailConnection() {
   if (!process.env.RESEND_API_KEY) {
     return { ok: false, error: 'RESEND_API_KEY not set in environment variables' };
   }
-  try {
-    // Test by checking if the API key is valid
-    const testResend = new Resend(process.env.RESEND_API_KEY);
-    // Resend doesn't have a verify endpoint, so we just check the key format
-    if (process.env.RESEND_API_KEY.startsWith('re_')) {
-      return { ok: true, service: 'Resend', note: 'API key format valid' };
-    }
+  if (!process.env.RESEND_API_KEY.startsWith('re_')) {
     return { ok: false, error: 'RESEND_API_KEY should start with re_' };
-  } catch (err) {
-    return { ok: false, error: err.message };
   }
+  return {
+    ok: true,
+    service: 'Resend',
+    from: process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev',
+    note: 'Free plan: can only send to your Resend-registered email. To send to anyone, verify a domain at resend.com/domains',
+  };
 }
 
 module.exports = { sendOtp, testEmailConnection };
