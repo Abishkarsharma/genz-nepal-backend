@@ -23,7 +23,7 @@ function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-// Step 1: Register — send OTP
+// Step 1: Register — send OTP (email first, save to DB only if email succeeds)
 router.post('/signup', async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
@@ -37,17 +37,32 @@ router.post('/signup', async (req, res) => {
     if (password.length < 6)
       return res.status(400).json({ message: 'Password must be at least 6 characters' });
 
+    // Check if EMAIL is configured — fail fast with clear message
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      return res.status(500).json({ message: 'Email service not configured. Contact admin.' });
+    }
+
     const exists = await User.findOne({ email });
     if (exists && exists.emailVerified)
-      return res.status(400).json({ message: 'Email already registered' });
+      return res.status(400).json({ message: 'Email already registered. Please sign in.' });
 
     const otp = generateOtp();
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
     const hashed = await bcrypt.hash(password, 10);
     const safeRole = ['seller'].includes(role) ? role : 'user';
 
+    // Try sending email FIRST — if it fails, don't create account
+    try {
+      await sendOtp(email, otp);
+    } catch (emailErr) {
+      console.error('Email send failed:', emailErr.message);
+      return res.status(500).json({
+        message: 'Could not send verification email. Please check your Gmail address and try again.',
+      });
+    }
+
+    // Email sent successfully — now save/update the account
     if (exists && !exists.emailVerified) {
-      // Resend OTP to pending account
       exists.name = name;
       exists.password = hashed;
       exists.role = safeRole;
@@ -61,11 +76,10 @@ router.post('/signup', async (req, res) => {
       });
     }
 
-    await sendOtp(email, otp);
-    res.json({ message: 'OTP sent to your email', requiresVerification: true });
+    res.json({ message: 'Verification code sent to your Gmail', requiresVerification: true });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Failed to send verification email. Check server email config.' });
+    console.error('Signup error:', err);
+    res.status(500).json({ message: 'Signup failed. Please try again.' });
   }
 });
 
