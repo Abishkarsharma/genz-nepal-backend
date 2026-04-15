@@ -39,6 +39,37 @@ router.put('/me', protect, async (req, res) => {
   }
 });
 
+// Update seller payment accounts (seller only)
+router.put('/me/payment-accounts', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (user.role !== 'seller') return res.status(403).json({ message: 'Only sellers can set payment accounts' });
+
+    const { esewa, khalti, bankName, accountName, accountNumber } = req.body;
+    const updated = await User.findByIdAndUpdate(
+      req.user.id,
+      { paymentAccounts: { esewa: esewa || '', khalti: khalti || '', bankName: bankName || '', accountName: accountName || '', accountNumber: accountNumber || '' } },
+      { new: true }
+    ).select('-password');
+
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Get seller payment accounts by seller ID (used in checkout)
+router.get('/seller/:id/payment', async (req, res) => {
+  try {
+    const seller = await User.findById(req.params.id).select('paymentAccounts name');
+    if (!seller) return res.status(404).json({ message: 'Seller not found' });
+    res.json({ name: seller.name, paymentAccounts: seller.paymentAccounts || {} });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // Change password
 router.put('/me/password', protect, async (req, res) => {
   try {

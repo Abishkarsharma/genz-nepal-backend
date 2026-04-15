@@ -12,6 +12,14 @@ const userSchema = new mongoose.Schema({
   emailVerified: { type: Boolean, default: false },
   emailOtp: { type: String, default: '' },
   emailOtpExpiry: { type: Date },
+  // Seller payment accounts — only used when role === 'seller'
+  paymentAccounts: {
+    esewa: { type: String, default: '' },       // eSewa registered phone/ID
+    khalti: { type: String, default: '' },      // Khalti registered phone/ID
+    bankName: { type: String, default: '' },    // Bank name
+    accountName: { type: String, default: '' }, // Account holder name
+    accountNumber: { type: String, default: '' }, // Account number
+  },
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);
