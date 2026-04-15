@@ -271,6 +271,40 @@ router.get('/seller', protect, requireRole('seller', 'admin'), async (req, res) 
   }
 });
 
+// Seller: confirm payment received manually (for COD / Bank Transfer)
+router.patch('/seller/:id/confirm-payment', protect, requireRole('seller', 'admin'), async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    // Verify seller owns at least one item in this order
+    const myProducts = await Product.find({ createdBy: req.user.id }).select('_id');
+    const myProductIds = myProducts.map((p) => String(p._id));
+    const hasItem = order.items.some((i) => myProductIds.includes(String(i.product)));
+    if (!hasItem && req.user.role !== 'admin')
+      return res.status(403).json({ message: 'Not your order' });
+
+    order.paymentStatus = 'paid';
+    order.paymentRef = req.body.paymentRef || 'confirmed-by-seller';
+    await order.save();
+
+    // Notify customer that payment was confirmed
+    try {
+      await Notification.create({
+        recipient: order.user,
+        type: 'order_status',
+        title: '✅ Payment Confirmed',
+        body: `Your payment for order #${String(order._id).slice(-8).toUpperCase()} has been confirmed by the seller.`,
+        orderId: order._id,
+      });
+    } catch (e) { console.error('Notification error:', e.message); }
+
+    res.json(order);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // Seller: update status of their orders
 router.patch('/seller/:id/status', protect, requireRole('seller', 'admin'), async (req, res) => {
   try {
